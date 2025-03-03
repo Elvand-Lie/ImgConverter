@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Image Converter</title>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; margin: 20px; }
+        #dropArea { margin-bottom: 10px; padding: 20px; border: 2px dashed #aaa; display: inline-block; width: 80%; cursor: pointer; background-color: #f9f9f9; }
+        #queue { list-style: none; padding: 0; }
+        .queue-item { margin: 5px; padding: 10px; background: #f0f0f0; display: flex; align-items: center; justify-content: space-between; }
+        .preview { width: 50px; height: 50px; object-fit: cover; margin-right: 10px; }
+        .action-buttons { display: flex; gap: 10px; }
+        .remove-btn, .download-btn { background: red; color: white; border: none; padding: 5px; cursor: pointer; }
+        .download-btn { background: green; display: none; }
+    </style>
+</head>
+<body>
+    <h1>Image Converter</h1>
+    <input type="file" id="fileInput" multiple accept="image/*" style="display: none;">
+    <div id="dropArea">Drag & Drop, Click, or Paste Images Here</div>
+    <select id="format">
+        <option value="jpeg">JPEG</option>
+        <option value="png">PNG</option>
+        <option value="webp">WebP</option>
+        <option value="avif">AVIF</option>
+        <option value="bmp">BMP</option>
+        <option value="gif">GIF</option>
+        <option value="ico">ICO</option>
+        <option value="tiff">TIFF</option>
+    </select>
+    <button id="convertBtn">Convert</button>
+    <button id="downloadZip">Download All as ZIP</button>
+    <ul id="queue"></ul>
+    <canvas id="canvas" style="display: none;"></canvas>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.7.1/jszip.min.js"></script>
+    <script>
+        document.addEventListener("DOMContentLoaded", () => {
+            const dropArea = document.getElementById("dropArea");
+            const fileInput = document.getElementById("fileInput");
+            const queue = document.getElementById("queue");
+            const convertBtn = document.getElementById("convertBtn");
+            const downloadZipBtn = document.getElementById("downloadZip");
+            const canvas = document.getElementById("canvas");
+            const ctx = canvas.getContext("2d");
+            let filesArray = [];
+            let convertedFiles = new Map();
+
+            dropArea.addEventListener("click", () => fileInput.click());
+            dropArea.addEventListener("dragover", (event) => {
+                event.preventDefault();
+                dropArea.style.backgroundColor = "#e0e0e0";
+            });
+            dropArea.addEventListener("dragleave", () => dropArea.style.backgroundColor = "#f9f9f9");
+            dropArea.addEventListener("drop", (event) => {
+                event.preventDefault();
+                dropArea.style.backgroundColor = "#f9f9f9";
+                handleFiles(event.dataTransfer.files);
+            });
+            fileInput.addEventListener("change", (event) => handleFiles(event.target.files));
+            document.addEventListener("paste", (event) => {
+                const items = event.clipboardData.items;
+                let files = [];
+                for (const item of items) {
+                    if (item.kind === "file") {
+                        files.push(item.getAsFile());
+                    }
+                }
+                if (files.length > 0) handleFiles(files);
+            });
+
+            function handleFiles(files) {
+                for (const file of files) {
+                    if (!file.type.startsWith("image")) continue;
+                    
+                    filesArray.push(file);
+                    const listItem = document.createElement("li");
+                    listItem.className = "queue-item";
+                    
+                    const img = document.createElement("img");
+                    img.className = "preview";
+                    img.src = URL.createObjectURL(file);
+                    
+                    const fileName = document.createElement("span");
+                    fileName.textContent = file.name;
+                    
+                    const actionButtons = document.createElement("div");
+                    actionButtons.className = "action-buttons";
+                    
+                    const removeBtn = document.createElement("button");
+                    removeBtn.textContent = "Remove";
+                    removeBtn.className = "remove-btn";
+                    removeBtn.addEventListener("click", () => {
+                        filesArray = filesArray.filter(f => f !== file);
+                        queue.removeChild(listItem);
+                        convertedFiles.delete(file.name);
+                    });
+                    
+                    const downloadBtn = document.createElement("button");
+                    downloadBtn.textContent = "Download";
+                    downloadBtn.className = "download-btn";
+                    downloadBtn.addEventListener("click", () => {
+                        const convertedBlob = convertedFiles.get(file.name);
+                        if (convertedBlob) {
+                            const link = document.createElement("a");
+                            link.href = URL.createObjectURL(convertedBlob);
+                            link.download = file.name.replace(/\.[^.]+$/, '') + '.' + document.getElementById("format").value;
+                            link.click();
+                        }
+                    });
+                    
+                    actionButtons.appendChild(downloadBtn);
+                    actionButtons.appendChild(removeBtn);
+                    listItem.appendChild(img);
+                    listItem.appendChild(fileName);
+                    listItem.appendChild(actionButtons);
+                    queue.appendChild(listItem);
+                }
+            }
+
+            convertBtn.addEventListener("click", () => {
+                if (filesArray.length === 0) return alert("No images to convert!");
+                const format = document.getElementById("format").value;
+                
+                filesArray.forEach(file => {
+                    const reader = new FileReader();
+                    reader.onload = (event) => {
+                        const img = new Image();
+                        img.onload = () => {
+                            canvas.width = img.width;
+                            canvas.height = img.height;
+                            ctx.drawImage(img, 0, 0);
+                            canvas.toBlob(blob => {
+                                convertedFiles.set(file.name, blob);
+                                queue.querySelectorAll(".download-btn").forEach(btn => btn.style.display = "inline-block");
+                            }, `image/${format}`);
+                        };
+                        img.src = event.target.result;
+                    };
+                    reader.readAsDataURL(file);
+                });
+            });
+
+            downloadZipBtn.addEventListener("click", () => {
+                if (convertedFiles.size === 0) return alert("No images to download!");
+                const zip = new JSZip();
+                convertedFiles.forEach((blob, fileName) => {
+                    zip.file(fileName.replace(/\.[^.]+$/, '') + '.' + document.getElementById("format").value, blob);
+                });
+                zip.generateAsync({ type: "blob" }).then(content => {
+                    const link = document.createElement("a");
+                    link.href = URL.createObjectURL(content);
+                    link.download = "converted_images.zip";
+                    link.click();
+                });
+            });
+        });
+    </script>
+</body>
+</html>
